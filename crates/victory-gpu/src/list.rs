@@ -1617,16 +1617,25 @@ mod state {
         one_range: i32,
         depth: *const u64,
     ) {
-        let handles: Vec<u64> = if one_range != 0 && !handles.is_null() {
+        // On the stack for the 8 targets D3D12 takes (a Vec past them).
+        let (mut stack, mut spilled) = ([0u64; 8], Vec::new());
+        let handles: &[u64] = if one_range != 0 && !handles.is_null() {
             // SAFETY: the title passes the first handle.
             let first = unsafe { *handles };
-            (0..u64::from(count)).map(|i| first + 128 * i).collect()
+            let made = (0..u64::from(count)).map(|i| first + 128 * i);
+            if count <= 8 {
+                stack.iter_mut().zip(made).for_each(|(at, h)| *at = h);
+                &stack[..count as usize]
+            } else {
+                spilled.extend(made);
+                &spilled
+            }
         } else {
-            items(handles, count).to_vec()
+            items(handles, count)
         };
         // SAFETY: the title passes a handle or null.
         let depth = unsafe { depth.as_ref() }.copied().unwrap_or(0);
-        with_state(this, |list, s| s.set_targets(list, &handles, depth));
+        with_state(this, |list, s| s.set_targets(list, handles, depth));
     }
     pub(super) extern "system" fn draw(
         this: This,
