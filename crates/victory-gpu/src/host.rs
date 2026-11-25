@@ -2565,7 +2565,7 @@ mod relay_tests {
     /// the fetch had run; the note goes when its flights have landed.
     #[test]
     fn a_piece_fetched_beside_a_later_flight_is_fetched_again_by_it() {
-        let mut noted = std::collections::HashMap::new();
+        let mut noted = FastMap::default();
         let (a, p) = (0x1000usize, 7u32);
         // Flight 5 lands; its fetch ran while 6 and 7 had started.
         assert_eq!(note_beside(&mut noted, &[(a, p)], 5, 7), 1);
@@ -4800,7 +4800,7 @@ impl Host {
             // plans have run, and their dwords are given to no other plan
             // before these are done with (`card_done`).
             let differs = unsafe { std::slice::from_raw_parts(differs as *const u32, dwords) };
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = FastSet::default();
             for &(number, plan) in plans {
                 let mut flags: Vec<(usize, u32, bool)> = plan
                     .ranges
@@ -5084,7 +5084,7 @@ impl Host {
                     return false;
                 }
                 // Pieces (copy, number) the compare flagged, with their ticket.
-                let mut tickets: std::collections::HashMap<(usize, u32), u32> = std::collections::HashMap::new();
+                let mut tickets: FastMap<(usize, u32), u32> = FastMap::default();
                 let mut flags: Vec<(usize, u32, bool)> = Vec::new();
                 for r in &plan.ranges {
                     let copy = Arc::as_ptr(&r.shadow) as usize;
@@ -5107,7 +5107,7 @@ impl Host {
                     }
                 }
                 let fetched = flagged_pieces(&flags);
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = FastSet::default();
                 for r in &plan.ranges {
                     let copy = Arc::as_ptr(&r.shadow) as usize;
                     for p in 0..r.span.pieces {
@@ -5301,7 +5301,7 @@ impl Host {
         &self,
         plan: &CardPlan,
         submitted: &mut u64,
-        seen: &mut std::collections::HashSet<(usize, usize, usize)>,
+        seen: &mut FastSet<(usize, usize, usize)>,
     ) {
         if plan.ranges.is_empty() {
             return;
@@ -5631,7 +5631,7 @@ impl Host {
                 }
                 submitting(3, flights);
                 let copying = std::time::Instant::now();
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = FastSet::default();
                 let mut back: Vec<Declared> = Vec::new();
                 for item in &items {
                     let Late::Run(flight) = item else {
@@ -5995,7 +5995,7 @@ impl Host {
         // For copies in the card's memory the compare has run there: the
         // pieces that differ are fetched and merged.
         if let Some(card) = &card {
-            self.card_back(card, &mut submitted, &mut std::collections::HashSet::new());
+            self.card_back(card, &mut submitted, &mut FastSet::default());
         }
         let back = declared_writes(runs);
         hand_back(&back);
@@ -6730,7 +6730,7 @@ impl HostList {
         // starts with (back to its real state if the list does not use it).
         let mut to_copy = Vec::new();
         let mut barriers = Vec::new();
-        let mut copying = std::collections::HashMap::new();
+        let mut copying = FastMap::default();
         for (depth, twin, colour) in &syncs {
             let (from, to) = if *colour {
                 (depth, &twin.colour)
@@ -7594,6 +7594,9 @@ impl std::hash::Hasher for AddrHash {
 }
 
 type AddrMap<V> = std::collections::HashMap<usize, V, std::hash::BuildHasherDefault<AddrHash>>;
+/// [`AddrHash`] for other keys of ours (addresses with sizes or indices).
+type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<AddrHash>>;
+type FastSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<AddrHash>>;
 
 /// The last submission's [`Batch`], emptied: its maps keep their room, so
 /// the next one does not grow them again from nothing (as long as building
