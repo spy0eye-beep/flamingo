@@ -3178,9 +3178,18 @@ impl Shadow {
     /// shader writes.
     fn update_free(&self, from: usize, to: usize) -> usize {
         if self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
-            if let Some((now, written)) = crate::watch::writes(from, to, true) {
+            thread_local! {
+                // The pages' answer, its room kept between refreshes.
+                static WRITTEN: std::cell::Cell<Vec<(usize, u64)>> = const { std::cell::Cell::new(Vec::new()) };
+            }
+            let mut written = WRITTEN.take();
+            let asked = crate::watch::writes_into(from, to, true, &mut written);
+            let copied = asked.map(|now| {
                 self.watched.store(1, Ordering::Relaxed);
-                let copied = self.copy_stale(from, to, now, &written);
+                self.copy_stale(from, to, now, &written)
+            });
+            WRITTEN.set(written);
+            if let Some(copied) = copied {
                 self.refresh_check(from, to);
                 #[cfg(feature = "diagnostics")]
                 {
