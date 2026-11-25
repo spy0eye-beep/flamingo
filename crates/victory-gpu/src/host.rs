@@ -2525,7 +2525,7 @@ mod relay_tests {
     /// the fetch had run; the note goes when its flights have landed.
     #[test]
     fn a_piece_fetched_beside_a_later_flight_is_fetched_again_by_it() {
-        let mut noted = FastMap::default();
+        let mut noted = std::collections::HashMap::new();
         let (a, p) = (0x1000usize, 7u32);
         // Flight 5 lands; its fetch ran while 6 and 7 had started.
         assert_eq!(note_beside(&mut noted, &[(a, p)], 5, 7), 1);
