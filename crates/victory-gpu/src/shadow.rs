@@ -1750,8 +1750,7 @@ fn back_piece(
     let last = last_difference(host, old).unwrap_or(first);
     let n = last + 1 - first;
     let (host, old) = (&mut host[first..=last], &old[first..=last]);
-    title.clear();
-    title.resize(n, 0);
+    let title = scratch_prefix(title, n);
     if !read(first, title) {
         return None;
     }
@@ -2732,8 +2731,7 @@ impl Shadow {
         let last = last_difference(now, held).unwrap_or(first);
         let (at, n) = (at + first, last + 1 - first);
         let (now, held) = (&now[first..=last], &mut held[first..=last]);
-        title.clear();
-        title.resize(n, 0);
+        let title = scratch_prefix(title, n);
         // Title memory not there: looked at again when the next flight
         // that declared the range lands (the snapshot stays as it is).
         if !crate::host::read_into((start + at) as *const u8, title) {
@@ -2741,7 +2739,7 @@ impl Shadow {
         }
         // The stretch as read: what the card did not change is the
         // title's, and may have been written again since.
-        let as_read = merge_race_on().then(|| title.clone());
+        let as_read = merge_race_on().then(|| title.to_vec());
         if !merge_piece(now, held, title) {
             return 0;
         }
@@ -3445,13 +3443,12 @@ impl Shadow {
         let last = last_difference(gpu, old).unwrap_or(first);
         let (at, n) = (at + first, last + 1 - first);
         let (gpu, old) = (&gpu[first..=last], &mut old[first..=last]);
-        title.clear();
-        title.resize(n, 0);
+        let title = scratch_prefix(title, n);
         let mut written = 0;
         if crate::host::read_into((start + at) as *const u8, title) {
             // The stretch as read: what the card did not change is the
             // title's, and may have been written again since.
-            let as_read = merge_race_on().then(|| title.clone());
+            let as_read = merge_race_on().then(|| title.to_vec());
             // As in `copy_back`: the card's byte where it is not what it
             // was before the submission, else the title's.
             let mut differs = 0u8;
@@ -3552,6 +3549,17 @@ impl Shadow {
         crate::host::write_mapped((start + at) as *mut u8, title.as_ptr(), n);
         n
     }
+}
+
+/// The first `len` bytes of `scratch`, grown (with zeros) only when it is
+/// shorter: a read that succeeds fills them all before they are used, and
+/// one that fails returns at once, so they need not be zeroed again each
+/// time (after AnyXboxX #224).
+fn scratch_prefix(scratch: &mut Vec<u8>, len: usize) -> &mut [u8] {
+    if scratch.len() < len {
+        scratch.resize(len, 0);
+    }
+    &mut scratch[..len]
 }
 
 struct Entry {
