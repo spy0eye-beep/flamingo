@@ -5753,7 +5753,9 @@ impl Host {
         // One write-watch asking for everything the submission refreshes
         // (`VICTORY_ASK_ONCE`): per copy, the span of its refreshed ranges.
         if crate::watch::once() {
-            let mut spans: std::collections::HashMap<usize, (usize, usize)> = std::collections::HashMap::new();
+            // (Keyed by our addresses, a lookup per refresh step; the
+            // ranges are sorted before they are asked, so order is free.)
+            let mut spans: AddrMap<(usize, usize)> = AddrMap::default();
             for list in runs {
                 for step in &list.deferred().copies {
                     if let Step::Refresh(shadow, address, len) = step
