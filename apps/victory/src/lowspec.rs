@@ -45,9 +45,44 @@ pub fn physical_memory() -> Option<u64> {
     None
 }
 
+/// `VICTORY_FAST=1`: the scheduling switches measured fastest in
+/// clankenjoyer/victory-fps (about 150 ms a frame standing still on an RTX
+/// A4500, against 204-234 ms without them), for those that flamingo has and
+/// leaves off. They change when work is submitted and waited for, not what
+/// is drawn. Not measured on flamingo itself, hence off unless asked for;
+/// a variable already set keeps its value. Left out: `VICTORY_VIEW_KNOWN`,
+/// with which flamingo's write-watch tests miss a write told at one view
+/// of a page at its others (stale pictures).
+pub const FAST: &[(&str, &str)] = &[
+    ("VICTORY_ASYNC_SUBMIT", "1"),
+    ("VICTORY_ASYNC_PRESENT", "1"),
+    ("VICTORY_QUEUE2", "1"),
+    ("VICTORY_MERGE_RUNS", "65536"),
+    ("VICTORY_LATE_WAIT_LISTS", "512"),
+    ("VICTORY_INDIRECT_WINDOW", "1"),
+];
+
+/// The switches [`FAST`] would set: none unless `fast`, and none the
+/// environment already sets (`set` says which it does).
+pub fn fast_switches(fast: bool, set: impl Fn(&str) -> bool) -> Vec<(&'static str, &'static str)> {
+    if !fast {
+        return Vec::new();
+    }
+    FAST.iter().copied().filter(|(name, _)| !set(name)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_is_off_unless_asked_and_keeps_what_is_set() {
+        assert!(fast_switches(false, |_| false).is_empty());
+        assert_eq!(fast_switches(true, |_| false).len(), FAST.len());
+        let kept = fast_switches(true, |n| n == "VICTORY_QUEUE2");
+        assert_eq!(kept.len(), FAST.len() - 1);
+        assert!(kept.iter().all(|(n, _)| *n != "VICTORY_QUEUE2"));
+    }
 
     const GB: u64 = 1 << 30;
 

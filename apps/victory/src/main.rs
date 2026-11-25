@@ -192,6 +192,13 @@ fn main() -> Result<()> {
                 Console::SeriesS => "series-s",
             };
             println!("console        {name} ({why})");
+            let fast = std::env::var_os("VICTORY_FAST").is_some_and(|v| v == "1");
+            for (switch, value) in lowspec::fast_switches(fast, |n| std::env::var_os(n).is_some()) {
+                println!("fast           {switch}={value}");
+                // SAFETY: at start-up, before any thread of ours or the
+                // title's reads the environment.
+                unsafe { std::env::set_var(switch, value) };
+            }
             run::run(&exe, unimplemented, strict, execute, console)
         }
         Command::Config => show_config(),
