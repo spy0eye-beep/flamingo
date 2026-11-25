@@ -472,6 +472,20 @@ pub(crate) fn asked(start: usize, end: usize) -> Option<(u64, Vec<(usize, u64)>)
 /// new), and the whole list, made anew at every one of some 2,400 askings
 /// a frame, was most of this function's time (run 119).
 pub(crate) fn writes(start: usize, end: usize, guarded: bool, since: u64) -> Option<(u64, Vec<(usize, u64)>)> {
+    let mut written = Vec::new();
+    writes_into(start, end, guarded, since, &mut written).map(|now| (now, written))
+}
+
+/// [`writes`] into `out` (emptied first), whose room is kept between calls:
+/// a refresh asks once per copy, tens of thousands of times a frame.
+pub(crate) fn writes_into(
+    start: usize,
+    end: usize,
+    guarded: bool,
+    since: u64,
+    out: &mut Vec<(usize, u64)>,
+) -> Option<u64> {
+    out.clear();
     use windows_sys::Win32::System::Memory::GetWriteWatch;
     const WRITE_WATCH_FLAG_RESET: u32 = 1;
     let (first, last) = (start / PAGE, end.div_ceil(PAGE));
@@ -479,14 +493,8 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool, since: u64) -> Opt
     let j = &mut *j;
     // Asked ahead with the submission's other ranges: the journal has it.
     if j.ahead.iter().any(|&(a, b)| a <= first && last <= b) {
-        return Some((
-            j.ahead_asked,
-            j.written
-                .range(first..last)
-                .filter(|&(_, &w)| w > since)
-                .map(|(&p, &w)| (p, w))
-                .collect(),
-        ));
+        out.extend(j.written.range(first..last).filter(|&(_, &w)| w > since).map(|(&p, &w)| (p, w)));
+        return Some(j.ahead_asked);
     }
     let mut count = (last - first) * PAGE / KERNEL_PAGE;
     j.found.resize(count.max(j.found.len()), 0);
@@ -548,14 +556,8 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool, since: u64) -> Opt
     for page in j.found[..count].iter().map(|&at| at / PAGE).chain(guarded) {
         j.written.insert(page, now);
     }
-    Some((
-        now,
-        j.written
-            .range(first..last)
-            .filter(|&(_, &w)| w > since)
-            .map(|(&p, &w)| (p, w))
-            .collect(),
-    ))
+    out.extend(j.written.range(first..last).filter(|&(_, &w)| w > since).map(|(&p, &w)| (p, w)));
+    Some(now)
 }
 
 /// Diagnostics: one in 2,048 of the askings the kernel's write watch
