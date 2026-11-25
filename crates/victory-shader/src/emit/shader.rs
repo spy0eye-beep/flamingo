@@ -84,6 +84,13 @@ pub const USER_VIEW_BIAS: u32 = 0x103;
 /// along axis `dword` where the last group is partial, else 0. The console runs no lane at
 /// or past it.
 pub const USER_DISPATCH_THREADS: u32 = 0x104;
+/// `RootType::Other` code of a user-data dword the host sets (after AnyXboxX
+/// a43c89e): the number of the first thread group in x. The console
+/// dispatches any number of groups in one dimension; the host at most
+/// 65,535, so a larger dispatch runs in parts, each with the groups before
+/// it here. Asked for by compute programs that are told the x number alone
+/// (the one-dimensional ones).
+pub const USER_GROUP_BASE: u32 = 0x105;
 
 /// `ShaderFlags` bits (metadata) and their `SFI0` feature bits.
 pub(crate) mod flags {
