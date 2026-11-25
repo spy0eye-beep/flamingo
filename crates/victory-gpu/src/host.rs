@@ -5745,7 +5745,7 @@ impl Host {
         let mut lists: Vec<Option<ID3D12CommandList>> = Vec::with_capacity(2 * runs.len());
         // Where each run's lists start in `lists`.
         let mut firsts = Vec::with_capacity(runs.len());
-        let mut batch = Batch::default();
+        let mut batch = Batch::spare();
         // The time a settle of flights takes inside this preparing: the
         // wait for the card and the copy-back have their own places on the
         // frame line (run 92 showed them twice, "preparing" 250 ms for 135).
@@ -5792,6 +5792,7 @@ impl Host {
             lists.push(list.list.cast().ok());
         }
         batch.flush();
+        batch.park();
         crate::watch::ask_once_end();
         // The snapshots of the ranges shaders may write, if they were left
         // for now (`crate::shadow::wide_back`): the refreshes are done, the
@@ -7552,7 +7553,27 @@ impl std::hash::Hasher for AddrHash {
 
 type AddrMap<V> = std::collections::HashMap<usize, V, std::hash::BuildHasherDefault<AddrHash>>;
 
+/// The last submission's [`Batch`], emptied: its maps keep their room, so
+/// the next one does not grow them again from nothing (as long as building
+/// them anew took as the lookups themselves).
+static SPARE_BATCH: Mutex<Option<Batch>> = Mutex::new(None);
+
 impl Batch {
+    /// An empty batch, with the room the last submission's had.
+    fn spare() -> Self {
+        SPARE_BATCH.lock().unwrap_or_else(|e| e.into_inner()).take().unwrap_or_default()
+    }
+
+    /// Empties this batch (it holds no copy or texture any more) and keeps
+    /// it for the next submission.
+    fn park(mut self) {
+        self.refreshes.clear();
+        self.index.clear();
+        self.current.clear();
+        self.textures.clear();
+        self.textures_due.clear();
+        *SPARE_BATCH.lock().unwrap_or_else(|e| e.into_inner()) = Some(self);
+    }
     fn add(&mut self, shadow: &std::sync::Arc<crate::shadow::Shadow>, address: usize, len: usize) {
         let end = address + len;
         let key = std::sync::Arc::as_ptr(shadow) as usize;
