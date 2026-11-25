@@ -40,6 +40,10 @@ frame can show).
 | 64 KiB pieces of `rep movsb` | `watch::try_copy` | measured-no-gain | same speed as one `rep movsb` |
 | Merge scratch not zeroed before each read | `shadow` card merges | shipped (after AnyXboxX #224) | 64 KiB 2.23 → 1.13 µs |
 | Same for `card_merge_relay` | `shadow` | not-identical | the scratch is used after a failed read |
+| Changed runs 64 bytes at a time | `shadow::changed_runs` | shipped (fxceless c36971b) | 48 MB, 12 of 16 differ 37.8–38.3 → 28.4–29.3 ms; all differ 15.7–16.4 → 4.0 |
+| Near runs joined before upload (`VICTORY_COPY_COALESCE`) | `shadow` | needs-game | AnyXboxX 08f8a1b, never run by its author; assumes the gap bytes match the card's |
+| Every title buffer's copy in card memory (`VICTORY_CARD_BUFFERS_MIN_KB`) | `shadow` | needs-game | fxceless: card time 68 → 50 ms a frame, but more VRAM on an 8 GB card |
+| GPU compare by groups of 64 threads | `host` card hash | shipped (upstream, on by default) | fxceless: 22–29 → 5.5–8.5 ms a frame |
 | `copy_stale` page loop | `shadow` | measured-no-gain | one lock, a few 64 KiB pages a refresh |
 | `VICTORY_COPY_PLAIN` (second plain copy) | `plaincopy` | measured-no-gain | superseded by `watch::try_copy` |
 
@@ -48,7 +52,7 @@ frame can show).
 | Item | Where | Status | Notes |
 |---|---|---|---|
 | Root constants on the stack | `State::bind` | shipped | 27.3–27.6 → 2.7–2.9 ns (4 dwords) |
-| Fresh table slots as a bit set | `State::tables` | shipped | 2 CBVs 35.2–35.5 → 8.0–8.1 ns |
+| Fresh table slots as a bit set | `State::tables` | shipped (AnyXboxX 0f7b43f did the same) | 2 CBVs 35.2–35.5 → 8.0–8.1 ns |
 | Render target handles without a list | `list::targets` | shipped | 26.7–27.4 → 0.6–1.1 ns |
 | `rtvs` list in `set_targets` | `State::set_targets` | measured-no-gain | each call also makes views through the driver, far dearer |
 | Heap list in `bind` | `State::bind` | once | only when the heaps change |
@@ -101,3 +105,9 @@ frame can show).
 | Async calls map | `xasync` | once | a few calls a frame |
 | Module names | `host` | once | at load |
 | Audio blocks | `audio` | needs-game | per voice buffer |
+
+## Pipelines (`pipeline/make.rs`)
+
+| Item | Where | Status | Notes |
+|---|---|---|---|
+| A waiter woken only by its own pipeline | `Pending::completion` | shipped (upstream; AnyXboxX 0f7b43f did the same) | |
