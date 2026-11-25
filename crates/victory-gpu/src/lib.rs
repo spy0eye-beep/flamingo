@@ -32,6 +32,8 @@ mod drvwatch;
 mod spread;
 #[cfg(windows)]
 mod draw;
+#[cfg(windows)]
+mod fps_overlay;
 pub mod dxgi;
 pub mod fence;
 pub mod frame;
