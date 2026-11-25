@@ -1954,9 +1954,15 @@ impl<'a> Lower<'a> {
         for (c, &dim) in cs.threads.iter().enumerate() {
             if dim > 1 {
                 let limit = self.host_word(RootType::Other(USER_DISPATCH_THREADS), 0, c as u32);
-                let Val::I32(group) = self.compute_id("groupId.i32", 94, c as u8) else {
+                let Val::I32(mut group) = self.compute_id("groupId.i32", 94, c as u8) else {
                     unreachable!()
                 };
+                // A dispatch run in parts: the groups before this part
+                // (`USER_GROUP_BASE`), as the program's own group id has.
+                if c == 0 && self.one_dimensional() {
+                    let before = self.host_word(RootType::Other(super::shader::USER_GROUP_BASE), 0, 0);
+                    group = self.s.m.bin(e, Bin::Add, group, before);
+                }
                 axes.push((c as u8, dim, limit, group));
             }
         }
@@ -2981,7 +2987,15 @@ impl<'a> Lower<'a> {
             // host's value can be.
             Input::FrontFace => (13, 0),
             Input::ThreadIdInGroup(c) => return self.thread_id(c),
-            Input::GroupId(c) => return self.compute_id("groupId.i32", 94, c),
+            Input::GroupId(c) => {
+                let id = self.compute_id("groupId.i32", 94, c);
+                if !self.one_dimensional() {
+                    return id;
+                }
+                let Val::I32(id) = id else { unreachable!() };
+                let base = self.host_word(RootType::Other(super::shader::USER_GROUP_BASE), 0, 0);
+                return Val::I32(self.s.m.bin(self.s.entry, Bin::Add, id, base));
+            }
             // Bits 0-5 the group's console waves, 6-11 this wave's index
             // among them (as Mesa reads `tg_size`).
             Input::GroupInfo => {
@@ -3064,6 +3078,16 @@ impl<'a> Lower<'a> {
     }
 
     /// A component of a compute thread or group id, read in the entry block.
+    /// Whether the program is a compute program that reads its group's
+    /// number in x alone, with room for a dword of the host's among its user data
+    /// (the host's root signature holds 64 dwords, views included).
+    fn one_dimensional(&self) -> bool {
+        const MOST: u32 = 20;
+        let reads = |c| self.x.io.inputs.iter().any(|i| i.1 == Input::GroupId(c));
+        let words = self.x.native.layout.iter().map(|e| u32::from(e.user_data) + e.sgprs).max().unwrap_or(0);
+        matches!(self.x.native.io, StageIo::Cs(_)) && reads(0) && !reads(1) && !reads(2) && words <= MOST && !crate::spill::is_spilled(self.x.native)
+    }
+
     fn compute_id(&mut self, name: &str, opcode: u32, c: u8) -> Val {
         let (entry, c) = (self.s.entry, self.s.m.i32(u32::from(c)));
         Val::I32(

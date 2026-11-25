@@ -90,6 +90,44 @@ const fn vgpr(n: u8) -> u16 {
     256 + n as u16
 }
 
+/// The first group's number the host gives the programs that ask for it.
+const GROUP_BASE: u32 = 65_535;
+
+/// A compute program that reads its group's number in x alone adds the number of
+/// the first group: a dispatch of more groups than the host runs comes in
+/// parts.
+#[test]
+fn a_group_number_in_x_counts_from_the_host_s_first_group() {
+    let program = |y: bool| -> Vec<u32> {
+        // s12 and s13: the group's number in x and in y (s5 and s6, after
+        // the 5 user SGPRs).
+        let mut words = vec![s_mov_b32(12, 5)];
+        if y {
+            words.push(s_mov_b32(13, 6));
+        }
+        words.push(s_mov_b32(5, 0x80));
+        words.extend_from_slice(&s_load_dwordx4(8, 4));
+        words.push(vop1(0x001, 1, sgpr(if y { 13 } else { 12 }))); // v_mov_b32 v1
+        words.push(vop1(0x001, 0, sgpr(12))); // v_mov_b32 v0, s12
+        // With y: what is stored is the number in y.
+        if y {
+            words.push(vop1(0x001, 0, vgpr(1))); // v_mov_b32 v0, v1
+        }
+        words.extend_from_slice(&buffer_store_dword(0, 8, 0));
+        words.push(S_ENDPGM);
+
+        words
+    };
+    const X: u32 = 1 << 7;
+    const Y: u32 = 1 << 8;
+    for (enabled, y, expected) in [(X, false, GROUP_BASE), (X | Y, false, GROUP_BASE), (X | Y, true, 0)] {
+        let shader = lower_words(program(y), 1, 0, enabled);
+        let asks = shader.user_data.iter().any(|u| u.root == RootType::Other(super::USER_GROUP_BASE));
+        assert_eq!(asks, expected != 0);
+        run_cases(&shader, &[[1, 2, 3, 4]], |label, _, _, out| assert_eq!(out, expected, "{label}"));
+    }
+}
+
 /// Builds and lowers a 1-thread synthetic RDNA2 compute shader that receives
 /// 4 dwords of root constants in `s0..s3`, runs `body` (leaving its result in
 /// `v0`), and stores `v0` to dword 0 of the raw UAV at heap index 0.
@@ -112,7 +150,12 @@ fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
     words.extend_from_slice(body);
     words.extend_from_slice(&buffer_store_dword(0, 8, 0));
     words.push(S_ENDPGM);
+    lower_words(words, threads, lds_bytes, 0)
+}
 
+/// Lowers a whole program of [`build_cs`]'s layout; `rsrc2`: more bits of
+/// that register.
+fn lower_words(words: Vec<u32>, threads: u32, lds_bytes: u32, rsrc2: u32) -> HostShader {
     let code: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
     let native = NativeProgram {
         stage: HwStage::Cs,
@@ -147,7 +190,7 @@ fn build_cs(body: &[u32], threads: u32, lds_bytes: u32) -> HostShader {
             slot: 1,
         }],
         io: StageIo::Cs(ComputeIo {
-            rsrc2: (5 << 1) | ((lds_bytes / 512) << 15), // 5 user SGPRs: s0..s4
+            rsrc2: rsrc2 | (5 << 1) | ((lds_bytes / 512) << 15), // 5 user SGPRs: s0..s4
             threads: [threads, 1, 1],
         }),
         code,
@@ -243,6 +286,7 @@ fn run_cases_on(
                 ud[u.index as usize] = match (u.root, u.slot) {
                     (RootType::Constants, 0) => inputs[u.dword as usize],
                     (RootType::Table, 1) => 0,
+                    (RootType::Other(super::USER_GROUP_BASE), _) => GROUP_BASE,
                     other => panic!("unexpected user data {other:?}"),
                 };
             }
