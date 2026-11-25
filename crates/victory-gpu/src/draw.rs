@@ -2968,17 +2968,17 @@ impl State {
         strict_cbv: bool,
     ) -> Vec<(u8, u32)> {
         let tables = |u: &&UsedResource| u.root == RootType::Table;
-        let mut fresh: Vec<u8> = used
-            .iter()
-            .filter(tables)
-            .filter(|u| u.kind == ResourceType::Cbv)
-            .map(|u| u.slot)
-            .collect();
+        // Slots as a set of all 256 a `u8` names: no list a bind, and taken
+        // in ascending order below, as the sorted list was.
+        let mut fresh = SlotSet::default();
+        for u in used.iter().filter(tables).filter(|u| u.kind == ResourceType::Cbv) {
+            fresh.insert(u.slot);
+        }
         // Tables reaching past a host heap smaller than the title's (the
         // host's limit, 1,000,000 views on NVIDIA) are made afresh too: the
         // title's slots there have no host slot of their own.
         for u in used.iter().filter(tables) {
-            if fresh.contains(&u.slot) {
+            if fresh.contains(u.slot) {
                 continue;
             }
             let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(u.slot)) else {
@@ -2992,18 +2992,16 @@ impl State {
                 continue;
             };
             if index >= host.count() {
-                fresh.push(u.slot);
+                fresh.insert(u.slot);
             }
         }
-        fresh.sort_unstable();
-        fresh.dedup();
         for u in used.iter().filter(tables) {
-            if !fresh.contains(&u.slot) {
+            if !fresh.contains(u.slot) {
                 self.table_entry(list, u, compute);
             }
         }
         let mut made = Vec::new();
-        for slot in fresh {
+        for slot in fresh.iter() {
             let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(slot)) else {
                 continue;
             };
@@ -3782,6 +3780,59 @@ impl State {
             DRAWN.fetch_add(1, Ordering::Relaxed);
         }
         true
+    }
+}
+
+/// A set of root parameter slots: every value a `u8` takes, one bit each.
+#[derive(Default, Clone, Copy)]
+struct SlotSet([u64; 4]);
+
+impl SlotSet {
+    fn insert(&mut self, slot: u8) {
+        self.0[usize::from(slot >> 6)] |= 1 << (slot & 63);
+    }
+
+    fn contains(&self, slot: u8) -> bool {
+        self.0[usize::from(slot >> 6)] & 1 << (slot & 63) != 0
+    }
+
+    /// The slots in ascending order.
+    fn iter(self) -> impl Iterator<Item = u8> {
+        self.0.into_iter().enumerate().flat_map(|(word, mut bits)| {
+            std::iter::from_fn(move || {
+                (bits != 0).then(|| {
+                    let bit = bits.trailing_zeros();
+                    bits &= bits - 1;
+                    (word as u32 * 64 + bit) as u8
+                })
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod slot_set_tests {
+    use super::SlotSet;
+
+    /// As the sorted, deduplicated list it replaces.
+    #[test]
+    fn a_slot_set_is_a_sorted_deduplicated_list() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..2_000 {
+            let (mut set, mut list) = (SlotSet::default(), Vec::new());
+            for _ in 0..(seed % 12) {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                let slot = seed as u8;
+                set.insert(slot);
+                list.push(slot);
+            }
+            list.sort_unstable();
+            list.dedup();
+            assert_eq!(set.iter().collect::<Vec<_>>(), list);
+            assert!((0..=255u8).all(|s| set.contains(s) == list.contains(&s)));
+        }
     }
 }
 
