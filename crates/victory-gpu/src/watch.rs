@@ -1749,6 +1749,39 @@ core::arch::global_asm!(
     "mov rcx, r8",
     ".globl flamingo_try_copy_body",
     "flamingo_try_copy_body:",
+    // From 1 MiB: the destination aligned to 16 bytes, then 64 bytes a
+    // step with stores that pass the cache by (`rep movsb` keeps them in
+    // it: a 16 MiB copy ran at half `memcpy`'s speed), the rest as below.
+    // Only volatile registers, no stack: a fault anywhere from the body to
+    // the end goes to the false return as before.
+    "cmp rcx, 1048576",
+    "jb 3f",
+    "mov rdx, rdi",
+    "neg rdx",
+    "and rdx, 15",
+    "sub rcx, rdx",
+    "mov r8, rcx",
+    "mov rcx, rdx",
+    "rep movsb",
+    "mov rdx, r8",
+    "shr rdx, 6",
+    "mov rcx, r8",
+    "and rcx, 63",
+    "2:",
+    "movdqu xmm0, [rsi]",
+    "movdqu xmm1, [rsi + 16]",
+    "movdqu xmm2, [rsi + 32]",
+    "movdqu xmm3, [rsi + 48]",
+    "movntdq [rdi], xmm0",
+    "movntdq [rdi + 16], xmm1",
+    "movntdq [rdi + 32], xmm2",
+    "movntdq [rdi + 48], xmm3",
+    "add rsi, 64",
+    "add rdi, 64",
+    "dec rdx",
+    "jnz 2b",
+    "sfence",
+    "3:",
     "rep movsb",
     ".globl flamingo_try_copy_end",
     "flamingo_try_copy_end:",
@@ -1758,6 +1791,8 @@ core::arch::global_asm!(
     "ret",
     ".globl flamingo_try_copy_fault",
     "flamingo_try_copy_fault:",
+    // Stores that passed the cache are ordered before the return.
+    "sfence",
     "xor eax, eax",
     "pop rsi",
     "pop rdi",
@@ -2436,6 +2471,40 @@ mod try_copy_tests {
             // The committed page still copies.
             assert!(try_copy(p, src.as_ptr(), 4096));
             assert_eq!(std::slice::from_raw_parts(p, 4096), &src[..4096]);
+            assert_ne!(VirtualFree(p.cast(), 0, MEM_RELEASE), 0);
+        }
+    }
+
+    /// From 1 MiB the copy streams: the same bytes for any alignment and
+    /// length, and a fault inside the streaming loop (reading or writing)
+    /// still says false without the process dying.
+    #[test]
+    fn large_copies_stream_and_refuse_reserved_pages() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+        };
+        const MB: usize = 1 << 20;
+        let src: Vec<u8> = (0..4 * MB as u32 + 200).map(|i| (i ^ i >> 9) as u8).collect();
+        for (from, to, len) in [(0, 0, MB), (1, 0, MB + 1), (0, 7, 2 * MB + 63), (13, 3, 3 * MB + 77), (5, 9, MB - 1)] {
+            let mut dst = vec![0u8; len + 64];
+            // SAFETY: inside both buffers.
+            assert!(try_copy(unsafe { dst.as_mut_ptr().add(to) }, unsafe { src.as_ptr().add(from) }, len), "{from} {to} {len}");
+            assert_eq!(&dst[to..to + len], &src[from..from + len], "{from} {to} {len}");
+            assert!(dst[..to].iter().all(|&b| b == 0) && dst[to + len..].iter().all(|&b| b == 0));
+        }
+        // SAFETY: plain reservations, released below.
+        unsafe {
+            let p = VirtualAlloc(std::ptr::null(), 4 * MB, MEM_RESERVE, PAGE_READWRITE) as *mut u8;
+            assert!(!p.is_null());
+            assert!(!VirtualAlloc(p.cast(), 2 * MB, MEM_COMMIT, PAGE_READWRITE).is_null());
+            let mut dst = vec![0u8; 3 * MB];
+            // Reading on into the reserved part, inside the streaming loop.
+            assert!(!try_copy(dst.as_mut_ptr(), p, 3 * MB));
+            // Writing on into it.
+            assert!(!try_copy(p.add(MB), src.as_ptr(), 2 * MB));
+            // The committed part still copies, streaming.
+            assert!(try_copy(p, src.as_ptr(), 2 * MB));
+            assert_eq!(std::slice::from_raw_parts(p, 2 * MB), &src[..2 * MB]);
             assert_ne!(VirtualFree(p.cast(), 0, MEM_RELEASE), 0);
         }
     }
