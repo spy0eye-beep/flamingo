@@ -7513,19 +7513,44 @@ struct Batch {
     /// the heap's buffers ready adds some 4,100 copies, and searching them
     /// for every refresh of a submission was tens of millions of
     /// comparisons a frame.
-    index: std::collections::HashMap<usize, usize>,
+    index: AddrMap<usize>,
     /// With [`refresh_once`], by copy (its address; the copy is held, so
     /// that the address names no other): the range of title addresses
     /// brought up to date in this submission that no step of ours has
     /// written since.
-    current: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
+    current: AddrMap<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
     /// Staging buffers (by address) refreshed since the last title write.
-    textures: std::collections::HashSet<usize>,
+    textures: std::collections::HashSet<usize, std::hash::BuildHasherDefault<AddrHash>>,
     /// With [`wide_textures`]: textures due, refreshed together at the next
     /// flush (before a step that writes title memory, and before the lists
     /// run), several at a time.
     textures_due: Vec<std::sync::Arc<crate::texture::Staging>>,
 }
+
+/// A hash for our own addresses, the keys of [`Batch`]'s maps (some 35,000
+/// lookups a frame): SipHash made them 1.75 times slower, and nothing a
+/// stranger chooses is hashed with it.
+#[derive(Default, Clone, Copy)]
+struct AddrHash(u64);
+
+impl std::hash::Hasher for AddrHash {
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(u64::from(b));
+        }
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+    fn write_usize(&mut self, v: usize) {
+        self.write_u64(v as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type AddrMap<V> = std::collections::HashMap<usize, V, std::hash::BuildHasherDefault<AddrHash>>;
 
 impl Batch {
     fn add(&mut self, shadow: &std::sync::Arc<crate::shadow::Shadow>, address: usize, len: usize) {
@@ -7575,7 +7600,7 @@ impl Batch {
     /// up to date. Kept: its union with what was up to date if they touch,
     /// else the larger of the two.
     fn brought(
-        current: &mut std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
+        current: &mut AddrMap<(std::sync::Arc<crate::shadow::Shadow>, usize, usize)>,
         shadow: &std::sync::Arc<crate::shadow::Shadow>,
         from: usize,
         to: usize,
