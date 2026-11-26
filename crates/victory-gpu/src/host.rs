@@ -7584,7 +7584,7 @@ struct Batch {
 /// lookups a frame): SipHash made them 1.75 times slower, and nothing a
 /// stranger chooses is hashed with it.
 #[derive(Default, Clone, Copy)]
-struct AddrHash(u64);
+pub(crate) struct AddrHash(u64);
 
 impl std::hash::Hasher for AddrHash {
     fn write(&mut self, bytes: &[u8]) {
@@ -7605,7 +7605,7 @@ impl std::hash::Hasher for AddrHash {
 
 type AddrMap<V> = std::collections::HashMap<usize, V, std::hash::BuildHasherDefault<AddrHash>>;
 /// [`AddrHash`] for other keys of ours (addresses with sizes or indices).
-type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<AddrHash>>;
+pub(crate) type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<AddrHash>>;
 type FastSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<AddrHash>>;
 
 /// The last submission's [`Batch`], emptied: its maps keep their room, so
