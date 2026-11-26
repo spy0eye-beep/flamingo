@@ -1139,10 +1139,23 @@ impl State {
             h => crate::descriptor::heap(h as This).host(),
         }?;
         let builder = crate::pipeline::is_builder(self.pipeline as This);
-        let (mut addresses, mut constants) = (Vec::new(), Vec::new());
+        // The root views' addresses on the stack for up to 32 (a draw's
+        // roots are a few; a Vec past them), the builder's constants in a Vec.
+        let (mut stack, mut spilled, mut views) = ([0u64; 32], Vec::new(), 0usize);
+        let mut constants = Vec::new();
         for root in self.roots_ref(compute) {
             match root {
-                Root::View(address) => addresses.push(*address),
+                Root::View(address) => {
+                    if views < stack.len() {
+                        stack[views] = *address;
+                    } else {
+                        if spilled.is_empty() {
+                            spilled.extend_from_slice(&stack);
+                        }
+                        spilled.push(*address);
+                    }
+                    views += 1;
+                }
                 // Only the structure builder passes structures in constants;
                 // elsewhere what looks like an address is mostly not one, and
                 // each took a numbered copy.
@@ -1154,7 +1167,8 @@ impl State {
         // must not declare every copy written (the builder's quarantine, and
         // the cost of comparing them all).
         let writes = writes && builder;
-        crate::memory::ready(list, heap, &addresses, &constants, writes)
+        let addresses: &[u64] = if views <= stack.len() { &stack[..views] } else { &spilled };
+        crate::memory::ready(list, heap, addresses, &constants, writes)
     }
 
     /// The bound heap holding `handle`.
