@@ -1331,10 +1331,13 @@ impl State {
             // SAFETY: an open list and a live pipeline.
             unsafe { l.SetPipelineState(&p.pso) };
             self.host_pipeline = p.pso.as_raw() as usize;
-            list.used_pipeline(self.host_pipeline, &p.name);
-            // The title may release the pipeline before it submits the list.
-            list.keep(&p.pso);
-            list.keep(&p.root);
+            // The title may release the pipeline before it submits the list:
+            // the list keeps it and its root signature, once (a kept
+            // pipeline's address names no other until the list's reset).
+            if list.used_pipeline(self.host_pipeline, &p.name) {
+                list.keep(&p.pso);
+                list.keep(&p.root);
+            }
         }
         for stage in &p.stages {
             let t = stage.translated();

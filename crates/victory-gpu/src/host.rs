@@ -6953,8 +6953,10 @@ impl HostList {
 
     /// Notes a pipeline the list binds; called where it is bound.
     /// `key`: the host pipeline's address (kept by the list until its reset).
-    pub(crate) fn used_pipeline(&self, key: usize, name: &str) {
-        if self.pipelines_seen.lock().unwrap_or_else(|e| e.into_inner()).insert(key) {
+    /// Whether the list binds it for the first time since its reset.
+    pub(crate) fn used_pipeline(&self, key: usize, name: &str) -> bool {
+        let first = self.pipelines_seen.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
+        if first {
             let mut pipelines = self.pipelines.lock().unwrap_or_else(|e| e.into_inner());
             if !pipelines.contains(name) {
                 pipelines.insert(name.to_owned());
@@ -6965,6 +6967,7 @@ impl HostList {
             crate::cardmeter::end(&self.list, crate::cardmeter::Span::from_raw(self.pipeline_meter.swap(u32::MAX, Ordering::Relaxed)));
             self.pipeline_meter.store(crate::cardmeter::begin_named(&self.list, name).raw(), Ordering::Relaxed);
         }
+        first
     }
 
     fn deferred(&self) -> std::sync::MutexGuard<'_, Deferred> {
