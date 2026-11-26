@@ -942,6 +942,10 @@ pub(crate) struct HostList {
     prelude: OnceLock<Option<Prelude>>,
     /// The pipelines the list binds, for reports of slow submissions.
     pipelines: Mutex<std::collections::BTreeSet<String>>,
+    /// The host pipelines whose names are in `pipelines`, by address: the
+    /// list keeps each one until its reset, so an address names one
+    /// pipeline meanwhile, and a bind finds its own without comparing names.
+    pipelines_seen: Mutex<FastSet<usize>>,
     /// The work its indirect executions may still do (`indirect`): a
     /// shader-writable word, zeroed when the list is submitted, and after
     /// it what the clamp notes about mesh records. In memory the CPU maps.
@@ -4094,6 +4098,7 @@ impl Host {
                 twins: Mutex::default(),
                 prelude,
                 pipelines: Mutex::default(),
+                pipelines_seen: Mutex::default(),
                 budget: OnceLock::new(),
                 card_budget: OnceLock::new(),
                 indirect_args: Mutex::default(),
@@ -6407,6 +6412,7 @@ impl HostList {
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.pipelines_seen.lock().unwrap_or_else(|e| e.into_inner()).clear();
         {
             let mut gather = self.gather.lock().unwrap_or_else(|e| e.into_inner());
             let Gather { closed, sets, spare, .. } = &mut *gather;
@@ -6946,8 +6952,9 @@ impl HostList {
     }
 
     /// Notes a pipeline the list binds; called where it is bound.
-    pub(crate) fn used_pipeline(&self, name: &str) {
-        {
+    /// `key`: the host pipeline's address (kept by the list until its reset).
+    pub(crate) fn used_pipeline(&self, key: usize, name: &str) {
+        if self.pipelines_seen.lock().unwrap_or_else(|e| e.into_inner()).insert(key) {
             let mut pipelines = self.pipelines.lock().unwrap_or_else(|e| e.into_inner());
             if !pipelines.contains(name) {
                 pipelines.insert(name.to_owned());
