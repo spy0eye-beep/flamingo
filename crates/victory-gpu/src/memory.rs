@@ -44,7 +44,6 @@
 //! compared on the CPU afterwards, as for any unordered access view): a
 //! dirty-page mask written by the shader would bound both.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use victory_shader::emit::{MEMORY_FAULTS, MEMORY_PAGES};
@@ -100,11 +99,11 @@ struct Memory {
     named: Vec<u64>,
     /// Per host view heap (by address): the first slot of its run, and per
     /// copy's place the generation of the view there (0: none yet).
-    heaps: HashMap<usize, (u32, Vec<u32>)>,
+    heaps: crate::host::FastMap<usize, (u32, Vec<u32>)>,
     /// The frame the faults were last read in.
     frame: u64,
     /// Pages asked for this frame that are not the title's memory.
-    refused: std::collections::HashSet<u64>,
+    refused: crate::host::FastSet<u64>,
 }
 
 // SAFETY: the mappings are of buffers the struct owns; all access is under
@@ -143,7 +142,7 @@ impl Memory {
             free: Default::default(),
             assigned: Vec::new(),
             named: Vec::new(),
-            heaps: HashMap::new(),
+            heaps: Default::default(),
             frame: u64::MAX,
             refused: Default::default(),
         })

@@ -7606,7 +7606,7 @@ impl std::hash::Hasher for AddrHash {
 type AddrMap<V> = std::collections::HashMap<usize, V, std::hash::BuildHasherDefault<AddrHash>>;
 /// [`AddrHash`] for other keys of ours (addresses with sizes or indices).
 pub(crate) type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<AddrHash>>;
-type FastSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<AddrHash>>;
+pub(crate) type FastSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<AddrHash>>;
 
 /// The last submission's [`Batch`], emptied: its maps keep their room, so
 /// the next one does not grow them again from nothing (as long as building
